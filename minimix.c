@@ -49,9 +49,10 @@ typedef struct {
 } jmm_channel_t;
 
 
-jack_port_t *outport[2] = {NULL, NULL};
+jack_port_t *outport[4] = {NULL, NULL, NULL, NULL};
 jack_client_t *client = NULL;
- 
+
+unsigned int monitor = 0;
 unsigned int verbose = 0;
 unsigned int quiet = 0;
 unsigned int running = 1;
@@ -239,6 +240,12 @@ int process_jack_audio(jack_nframes_t nframes, void *arg)
 		jack_port_get_buffer(outport[0], nframes);
 	jack_default_audio_sample_t *out_right =
 		jack_port_get_buffer(outport[1], nframes);
+	jack_default_audio_sample_t *monitor_left = NULL;
+	jack_default_audio_sample_t *monitor_right = NULL;
+	if (monitor) {
+		monitor_left = jack_port_get_buffer(outport[2], nframes);
+		monitor_right = jack_port_get_buffer(outport[3], nframes);
+	}
 	jack_nframes_t n=0;
 	int ch;
 	
@@ -246,6 +253,10 @@ int process_jack_audio(jack_nframes_t nframes, void *arg)
 	for ( n=0; n<nframes; n++ ) {
 		out_left[ n ] = 0;
 		out_right[ n ] = 0;
+		if (monitor) {
+			monitor_left[ n ] = 0;
+			monitor_right[ n ] = 0;
+		}
 	}
 
 	// Mix each input into the output buffer
@@ -273,6 +284,10 @@ int process_jack_audio(jack_nframes_t nframes, void *arg)
 		for ( n=0; n<nframes; n++ ) {
 			out_left[ n ] += (in_left[ n ] * mix_gain);
 			out_right[ n ] += (in_right[ n ] * mix_gain);
+			if (monitor) {
+				monitor_left[ n ] += (in_left[ n ] );
+				monitor_right[ n ] += (in_right[ n ]);
+			}
 		}
 		
 	}
@@ -350,6 +365,19 @@ void init_jack( const char * client_name )
 		exit(1);
 	}
 	
+	// Create our pair of monitor ports
+	if (monitor) {
+		if (!(outport[2] = jack_port_register(client, "monitor_left", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0))) {
+			fprintf(stderr, "Cannot register output port 'monitor_left'.\n");
+			exit(1);
+		}
+
+		if (!(outport[3] = jack_port_register(client, "monitor_right", JACK_DEFAULT_AUDIO_TYPE, JackPortIsOutput, 0))) {
+			fprintf(stderr, "Cannot register output port 'monitor_right'.\n");
+			exit(1);
+		}
+	}
+
 	// Register shutdown callback
 	jack_on_shutdown (client, shutdown_callback_jack, NULL );
 
@@ -475,6 +503,7 @@ int usage( )
 	printf("   -c <count>    Number of input channels (default 4)\n");
 	printf("   -p <port>     Set the UDP port number for OSC\n");
 	printf("   -n <name>     Name for this JACK client (default minimix)\n");
+	printf("   -m            Enable monitor output ports\n");
 	printf("   -v            Enable verbose mode\n");
 	printf("   -q            Enable quiet mode\n");
 	printf("\n");
@@ -494,7 +523,7 @@ int main(int argc, char *argv[])
 	
 	
 	// Parse the command line arguments
-	while ((opt = getopt(argc, argv, "al:r:c:n:p:vqh")) != -1) {
+	while ((opt = getopt(argc, argv, "al:r:c:n:p:vmqh")) != -1) {
 		switch (opt) {
 			case 'a':  autoconnect = 1; break;
 			case 'l':  connect_left = optarg; break;
@@ -502,6 +531,7 @@ int main(int argc, char *argv[])
 			case 'c':  channel_count = atoi(optarg); break;
 			case 'n':  client_name = optarg; break;
 			case 'p':  osc_port = optarg; break;
+			case 'm':  monitor = 1; break;
 			case 'v':  verbose++; break;
 			case 'q':  quiet++; break;
 			default:
